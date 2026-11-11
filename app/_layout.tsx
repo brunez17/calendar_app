@@ -1,56 +1,73 @@
-import { useFonts } from 'expo-font';
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { ThemeProvider, DarkTheme, DefaultTheme, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { useColorScheme } from 'react-native';
+import 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
-import { useColorScheme } from '@/components/useColorScheme';
+import { AuthProvider, useAuth } from '@/src/features/auth/AuthContext';
+import { useAppStore } from '@/src/store/useAppStore';
+import { colors } from '@/src/ui/theme';
 
-export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
-} from 'expo-router';
+export { ErrorBoundary } from 'expo-router';
 
-export const unstable_settings = {
-  // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: '(tabs)',
-};
-
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout() {
-  const [loaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-  });
+function Bootstrap({ children }: { children: React.ReactNode }) {
+  const { ready, accessToken, mode } = useAuth();
+  const hydrate = useAppStore((s) => s.hydrate);
+  const syncDrive = useAppStore((s) => s.syncDrive);
+  const setAccessTokenGetter = useAppStore((s) => s.setAccessTokenGetter);
+  const hydrated = useAppStore((s) => s.hydrated);
+  const bootstrapped = useRef(false);
+  const driveSyncedForToken = useRef<string | null>(null);
 
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
-    if (error) throw error;
-  }, [error]);
+    setAccessTokenGetter(() => accessToken);
+  }, [accessToken, setAccessTokenGetter]);
 
   useEffect(() => {
-    if (loaded) {
+    if (!ready || bootstrapped.current) return;
+    bootstrapped.current = true;
+    hydrate().finally(() => {
       SplashScreen.hideAsync();
-    }
-  }, [loaded]);
+    });
+  }, [ready, hydrate]);
 
-  if (!loaded) {
+  useEffect(() => {
+    if (mode !== 'google' || !accessToken) return;
+    if (driveSyncedForToken.current === accessToken) return;
+    driveSyncedForToken.current = accessToken;
+    syncDrive().catch((e) => console.warn('Initial Drive sync failed', e));
+  }, [mode, accessToken, syncDrive]);
+
+  if (!ready || !hydrated) {
     return null;
   }
 
-  return <RootLayoutNav />;
+  return <>{children}</>;
 }
 
-function RootLayoutNav() {
+export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-      </Stack>
-    </ThemeProvider>
+    <AuthProvider>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <Bootstrap>
+          <Stack
+            screenOptions={{
+              headerStyle: { backgroundColor: colors.surface },
+              headerTintColor: colors.ink,
+              contentStyle: { backgroundColor: colors.bg },
+            }}
+          >
+            <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+            <Stack.Screen name="(app)" options={{ headerShown: false }} />
+          </Stack>
+        </Bootstrap>
+      </ThemeProvider>
+    </AuthProvider>
   );
 }
